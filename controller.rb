@@ -5,47 +5,45 @@ class Controller < Autumn::Leaf
     BasecampAPI.establish_connection!(options[:hostname], options[:username], options[:password], true)
   end
 
+  def reload_lists!
+    @todo_lists = nil
+    todo_lists
+  end
+
+  def list_named(name)
+    todo_lists.each_key do |title|
+      return todo_lists[title] if title.downcase.include?(name.downcase)
+    end
+    nil
+  end
+
   def todo_command(stem, sender, reply_to, msg)
-    cmd, args = msg.to_s.split(' ', 2)
-    return "USAGE: $todo «command» [arguments] – command is one of: add, reload" if cmd.nil? or cmd.strip.empty?
+    list, message = msg.to_s.split(' ', 2)
+    if list.nil? or list.strip.empty? or message.nil? or message.strip.empty?
+      return 'USAGE: $todo <list> <message>'
+    end
 
-    case cmd
-    when 'reload'
-      @todo_lists = nil
-      todo_lists
-    when 'add'
-      list, message = args.to_s.split(' ', 2)
-      if list.nil? or list.strip.empty? or message.nil? or message.strip.empty?
-        return 'USAGE: $todo add <list> <message>'
-      end
+    owner_id = nil
+    list.sub!(/\[(\w+)\]/) do
+      return "No user info for #{$1}" unless options[:users][$1]
+      owner_id = options[:users][$1]['id']
+      ''
+    end
 
-      owner_id = nil
-      list.gsub!(/\[(\w+)\]/) do
-        return "No user info for #{$1}" unless options[:users][$1]
-        owner_id = options[:users][$1]['id']
-        ''
-      end
+    unless list_id = list_named(list)
+      reload_lists!
+      list_id = list_named(list)
+    end
+    return "No list matching “#{list}” found" unless list_id
 
-      list_id = nil
-      todo_lists.each_key do |title|
-        if title.downcase.include?(list.downcase)
-          list_id = todo_lists[title]
-          break
-        end
+    begin
+      if BasecampAPI::TodoItem.create(:todo_list_id => list_id, :content => message, :responsible_party => owner_id)
+        "Todo added"
+      else
+        "Failed"
       end
-      return "No list matching “#{list}” found" unless list_id
-
-      begin
-        if BasecampAPI::TodoItem.create(:todo_list_id => list_id, :content => message, :responsible_party => owner_id)
-          "Todo added"
-        else
-          "Failed"
-        end
-      rescue
-        "Failed to add todo: #{$!}"
-      end
-    else
-      "Unknown command #{cmd}"
+    rescue
+      "Failed to add todo: #{$!}"
     end
   end
 
